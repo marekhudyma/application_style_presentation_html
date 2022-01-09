@@ -1,0 +1,436 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<title>Vision of development of backend services with Spring Boot</title>
+
+		<link rel="stylesheet" href="dist/reset.css">
+		<link rel="stylesheet" href="dist/reveal.css">
+		<link rel="stylesheet" href="dist/theme/black.css" id="theme">
+
+		<!-- Theme used for syntax highlighted code -->
+		<link rel="stylesheet" href="plugin/highlight/monokai.css" id="highlight-theme">
+	</head>
+	<body>
+		<div class="reveal">
+			<div class="slides">
+
+ 				<section>
+					<section>
+						<h2>Bold vision of development of backend services with Spring Boot</h2>
+						<div>by Marek Hudyma</div>
+				   </section>
+					<section>
+						<h2>Purpose of vision:</h2>
+						<ul>
+							<li>start discussion</li>
+							<li>inspire</li>
+							<li>make agreements inside team across some topics</li>
+						</ul>
+					</section>
+					<section>
+						<h2>Technical assumptions:</h2>
+						<ul>
+							<li>used Java 14 with flag <b>--enable-preview</b></li>
+							<li>used Spring Boot 2.3.2.RELEASE</li>
+						</ul>
+					</section>	
+					<section>
+						<h2>Main architectural assumptions:</h2>
+						<ul>
+							<li>Do not control flow by exceptions</li>
+							<li>Application uses CQRS</li>
+							<li>Follow Domain-driven design principles <br />
+								(not covered)</li>
+						</ul>
+					</section>
+				</section>
+
+ 				<section>
+					<section>
+						<h2>Do not control flow by exceptions</h2>
+							<blockquote style="width: 110%;">
+"An exception is abnormal condition that arises in a code sequence at run time. In other words, an exception is a run-time error."
+							</blockquote>
+							<blockquote style="width: 110%;">
+"Java’s exception-handling statements should not be considered a general mechanism for nonlocal branching. If you do so, it will only confuse your code and make it hard to maintain."
+							</blockquote>
+							<small>Java the Complete Reference, Tenth edition</small>
+				   </section>
+					<section>
+						<h2>The principle of least astonishment (POLA)</h2>
+						<div>The principle of least astonishment (POLA), also called the principle of least surprise. <br/>
+						The principle means that a component of a system should behave in a way that most users will expect it to behave; the behavior should not astonish or surprise users.</div>
+					</section>	
+					<section>
+						<h2>Arguments to not throw business exceptions</h2>
+						<ul>
+							<li>Breaking Principle of least astonishment</li>
+							<li>Exceptions can be used as sophisticated GOTO statements</li>
+							<li>Exceptions pollutes you application logs</li>
+							<li>Usage of exceptions make your code more difficult to read, understand and maintain</li>
+							<li>Exceptions degrade speed of application</li>
+						</ul>
+					</section>
+					<section>
+						<h3>Example how to return errors</h3>
+						<pre><code data-trim data-noescape style="width: 130%;">		
+    public Result&lt;Error, Account> execute(Account account) {
+        return accountRepository.findById(account.getId())
+                .map(a -> Result.fail(a, Error.ACCOUNT_ALREADY_EXIST))
+                .orElseGet(() -> Result.ok(accountRepository.save(account));
+    }
+
+    public enum Error {
+        ACCOUNT_ALREADY_EXIST
+    }
+    					</code></pre>
+					</section>
+				</section>
+				
+
+
+
+
+				<section>
+					<section>
+						<h2>CQRS</h2>
+						<blockquote style="width: 110%;">
+"Command–query separation (CQS) is a principle of imperative computer programming [...]
+It states that every method should either be a command that performs an action, or a query that returns data to the caller, but not both. In other words, Asking a question should not change the answer."
+						</blockquote>
+						<blockquote style="width: 110%;">
+"Command query responsibility segregation (CQRS) applies the CQS principle by using separate Query and Command objects to retrieve and modify data, respectively."
+						</blockquote>
+				   </section>
+
+					<section>
+						<h2>Command</h2>
+						<pre><code data-trim data-noescape>public interface Command&lt;INPUT, RESULT> {
+
+    RESULT execute(INPUT input);
+
+}						
+						</code></pre>
+				   </section>
+					<section>
+						<pre><code data-trim data-noescape style="width: 130%; max-height: 100%">	
+@Component
+@RequiredArgsConstructor
+public class CreateAccountCommand implements Command<Account, Result&lt;Error, Account>> {
+
+    private final AccountRepository accountRepository;
+
+    public Result&lt;Error, Account> execute(Account account) {
+        return accountRepository.findById(account.getId())
+                .map(a -> Result.fail(a, Error.ACCOUNT_ALREADY_EXIST))
+                .orElseGet(() -> save(account));
+    }
+
+    private Result&lt;Error, Account> save(Account account) {
+        try {
+            return Result.ok(accountRepository.save(account));
+        } catch (DataIntegrityViolationException e) {
+            return Result.fail(account, Error.ACCOUNT_ALREADY_EXIST);
+        }
+    }
+
+    public enum Error {
+        ACCOUNT_ALREADY_EXIST
+    }
+
+}
+						</code></pre>
+		   			</section>
+	   				<section>
+						<h2>Query</h2>
+						<pre><code data-trim data-noescape>public interface Query&lt;INPUT, RESULT> {
+
+    RESULT execute(INPUT input);
+
+}						
+						</code></pre>
+				   </section>
+					<section>
+						<pre><code data-trim data-noescape style="width: 130%; max-height: 100%">	
+
+@Component
+@RequiredArgsConstructor
+class GetAccountQuery implements Query&lt;AccountId, Result&lt;Error, Account>> {
+
+    private final AccountRepository accountRepository;
+
+    @Transactional(readOnly = true)
+    public Result&lt;Error, Account> execute(AccountId accountId) {
+        return accountRepository.findById(accountId)
+                .map(Result::&lt;Error, Account>ok)
+                .orElse(Result.fail(Error.ACCOUNT_NOT_FOUND));
+    }
+
+    public enum Error {
+        ACCOUNT_NOT_FOUND
+    }
+
+}
+						</code></pre>
+				   </section>
+					<section>
+						<h2>Advantages of CQRS</h2>
+						<ul>
+							<li>Clear separation between read and write operations</li>
+							<li>All operations are separated (fit to Single responsibility principle)</li>
+							<li>May simplify understanding of domain</li>
+							<li>Easier to split work</li>
+							<li>Event Sourcing combines nicely with CQRS</li>
+							<li>Easy to find all places where you modify data</li>
+						</ul>
+
+					</section>
+				</section>
+
+				<section>
+					<h2>Follow Domain-driven design prinicples</h2>
+					<ul>
+						<li>Not covered here</li>
+					</ul>
+				</section>	
+
+				<section>
+					<section>	
+						<h2>DTO</h2>	
+						<ul>
+							<li>POJO - Plain Old Java Object</li>
+							<li>Immutable</li>
+							<li>Don't reuse DTOs</li>
+						</ul>
+				   </section>	
+					<section>	
+						<h2>DTO in Java 14</h2>	
+						<pre><code data-trim data-noescape style="width: 130%; max-height: 100%">	
+// TODO remove @JsonProperty when Jackson support records
+public record CreateAccountDto(
+
+        @NotNull
+        @JsonProperty("id")
+        UUID id,
+
+        @NotEmpty
+        @JsonProperty("name")
+        String name,
+
+        @NotNull
+        @Min(0)
+        @Max(100)
+        @JsonProperty("scoring")
+        Integer scoring
+) {
+
+}
+						</code></pre>
+				   </section>
+				   <section>	
+						<h2>DTO with Lombok</h2>	
+						<pre><code data-trim data-noescape style="width: 130%; max-height: 100%">	
+	@Builder
+	@RequiredArgsConstructor
+	@Data
+	public class CreateAccountDto {
+	
+	    @NotNull
+	    private final UUID id;
+	
+	    @NotBlank
+	    @Max(50)
+	    private final String name;
+	
+	    @Min(0)
+	    @Max(100)
+	    private final int scoring;
+	
+	}
+						</code></pre>
+				   </section>
+				</section>
+
+				<section>
+					<section>	
+						<h2>Validation in HTTP layer</h2>	
+						<ul>
+							<li>by annotations from package <b>javax.validation.constraints.*.</b></li>
+							<li>by custom validators</li>
+							<li>validation on this level must not call service layer / storage. </li>
+						</ul>
+				   </section>	
+	   			</section>	
+				<section>
+					<section>	
+						<h2>Controllers</h2>	
+						<ul>
+							<li>handle http call</li>
+							<li>make simple validation of `DTO` (e.g. using @Valid annotation)</li>
+							<li>convert DTO to the object accepted by Service layer</li>
+							<li>handle response from `Service Layer` and map it to `HTTP` response.</li>
+						</ul>
+				   </section>	
+				   <section>	
+						<h2>Converters</h2>	
+						<div>Use Spring org.springframework.core.convert.converter.Converter interface to create Converters. It is a functional interface that can be tested in a separation.</div>
+
+						<pre><code data-trim data-noescape style="width: 130%; max-height: 100%">	
+public class CreateAccountDtoToAccountConverter 
+	implements Converter&lt;CreateAccountDto, Account> {
+
+    @Override
+    public Account convert(CreateAccountDto source) {
+        return Account.builder()
+                .id(AccountId.from(source.id()))
+                .name(source.name())
+                .scoring(source.scoring())
+                .build();
+    }
+}
+						</code></pre>
+				   </section>	
+ 					<section>	
+						<h2>Usage of Service layer.</h2>
+						<ul>	
+							<li>Service should not use object from layer above, so DTOs should not be passed to services directly as DTOs</li>
+							<li>Pass argument to the method, e.g. service.call(argument1, argument2);</li>
+							<li>Convert DTO to Entity object</li>
+							<li>Service can accept interface, DTO can implement this interface, than it can be passed directly to service</li>
+						</ul>
+ 					</section>	
+ 					<section>
+ 						<h2>Exceptions from service</h2>
+ 						<ul>
+ 							<li>HTTP codes should not be returned by exceptions</li>
+ 							<li>Predictable exceptions should be handled by RESPONSE</li>
+							<li>Exception handler can be added exceptionally, for the exception types that cannot be handled in a different way, e.g.: MethodArgumentTypeMismatchException, MethodArgumentNotValidException</li>
+							<li>Use a proper problem JSON for handling errors, by following <a href="https://opensource.zalando.com/restful-api-guidelines/#176">Zalando standard</a></li>
+						</ul>
+ 					</section>
+	   			</section>	
+
+
+	   			<section>
+	   				<section>
+	   					<h2>Domain layer</h2>
+   						<ul>
+ 							<li>Use Commands to execute logic</li>
+							<li>Use Queries to retrieve data</li>
+ 							<li>Don't execute long tasks inside database transaction (e.g. HTTP call)</li>
+							<li>use @Transactional / @Transactional(readOnly = true)</li>
+						</ul>
+	   				</section>
+	   			</section>
+
+	   			<section>
+	   				<section>
+	   					<h2>Data access layer</h2>
+   						<ul>
+ 							<li>Use as little business logic as possible</li>
+							<li>Test it with IntegrationTests</li>
+						</ul>
+	   				</section>
+	   			</section>
+
+	   			<section>
+	   				<section>
+	   					<h2>Model</h2>
+   						<ul>
+							<li>use Entity / Aggregate / Value Object patters</li>
+							<li>Identified by id</li>
+							<li>always use createdAt, updatedAt properties</li>
+							<li>muttable</li>
+							<li>no setters</li>
+							<li>expose behavior</li>
+							<li>Consider introducing key types</li>
+							<pre><code>@EmbeddedId
+@AttributeOverride(name = "value", 
+	column = @Column(name = "id"))
+private AccountId id;
+							</code></pre>	
+						</ul>
+	   				</section>
+	   			</section>
+
+					
+
+	   			<section>
+	   				<section>
+	   					<h2>Unit Tests</h2>
+						<ul>
+							<li>Test logic</li>
+							<li>Test Controllers with @WebMvcTest (serialization, error codes, HTTP statuses) </li>
+						</ul>
+   					</section>
+
+
+					<section>
+	   					<h2>IntegrationTests</h2>
+						<ul>
+							<li>Test integration with external components (Database, AWS, REST calls)</li>
+							<li>Uses current context - easy to debug</li>
+							<li>Test corner cases</li>
+							<li>Can use e.g. Repositories to prepare database state</li>
+							<li>Can use DTOs</li>
+							<li>Use awaitibility library for testing asynchronous code</li>
+							<pre><code>await().atMost(10, SECONDS).until(() -> {
+	// condition
+});
+        					</pre></code>
+						</ul>
+   					</section>
+
+					<section>
+	   					<h2>Functional Tests</h2>
+						<ul>
+							<li>Make blackbox tests</li>
+							<li>Don't prepare database state manually - use offical interfaces only</li>
+							<li>Cannot use production code like DTOs</li>
+							<li>Don't reuse JSONs - directory path the same like package</li>
+						</ul>
+   					</section>
+
+					<section>
+	   					<h2>Test builders</h2>
+						<pre><code>@RequiredArgsConstructor
+public class AccountTestBuilder extends Account.AccountBuilder {
+
+    private final int seed;
+
+    public Account.AccountBuilder withTestDefaults() {
+        return Account.builder()
+                .id(AccountId.from(seed))
+                .name(format("name.%d", seed))
+                .scoring(seed)
+                .version(seed);
+    }
+}
+</code></pre>
+   					</section>
+
+   	
+				</section>
+			</div>
+		</div>
+
+		<script src="dist/reveal.js"></script>
+		<script src="plugin/notes/notes.js"></script>
+		<script src="plugin/markdown/markdown.js"></script>
+		<script src="plugin/highlight/highlight.js"></script>
+		<script>
+			// More info about initialization & config:
+			// - https://revealjs.com/initialization/
+			// - https://revealjs.com/config/
+			Reveal.initialize({
+				hash: true,
+
+				// Learn about plugins: https://revealjs.com/plugins/
+				plugins: [ RevealMarkdown, RevealHighlight, RevealNotes ]
+			});
+		</script>
+	</body>
+</html>
